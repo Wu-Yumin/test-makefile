@@ -1,0 +1,44 @@
+
+# 假设生成的目标为 __build，则它依赖于当前目录的 built-in.o
+# 而要生成当前目录下的 built-in.o，依赖于下一层目录的编译结果(built-in.o)和本层的*.o
+# 那么为了保证在生成本层 built-in.o 之前，下一层的 built-in.o 已存在
+# 则假想 __build 有一个依赖 subdir-y，并且保证它的命令被执行
+
+PHONY := __build
+__build :
+
+obj-y :=
+subdir-y :=
+
+# 每次递归调用 Makefile.build，先将该层的 Makefile 包含进来
+include Makefile
+
+# 处理各个变量：cur_objs, sub_objs, subdir-y, dep_files
+cur_objs := $(filter-out %/, $(obj-y))
+dep_files := $(foreach f, $(cur_objs), .$(f).d)
+dep_files := $(wildcard $(dep_files))
+ifneq ($(dep_files),)
+	include $(dep_files)
+endif
+
+__subdir-y := $(patsubst %/, %, $(filter %/, $(obj-y)))
+subdir-y += $(__subdir-y)
+
+sub_objs := $(foreach f, $(subdir-y), $(f)/built-in.o)
+
+# 把下一层的操作作为本层目标的一个依赖
+PHONY += $(subdir-y)
+__build : $(subdir-y) built-in.o
+
+$(subdir-y) :
+	make -C $@ -f $(TOPDIR)/Makefile.build
+
+built-in.o : $(cur_objs) $(sub_objs)
+	$(LD) -r -o $@ $^
+
+dep_f = .$@.d
+%.o : %.c
+	$(CC) $(CFLAGS) -Wp,-MD,$(dep_f) -c -o $@ $<
+
+# 声明 PHONY 变量不是一个具体的文件
+.PHONY : $(PHONY)
